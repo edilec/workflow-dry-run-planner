@@ -1,0 +1,56 @@
+{
+  "workflow": "publish-to-production",
+  "description": "The same release wired straight to production, with two prerequisites nobody supplies and several effects a rehearsal could not undo.",
+  "steps": [
+    {
+      "id": "checkout",
+      "title": "Restore the working tree at the requested revision",
+      "inputs": ["repo.revision"],
+      "outputs": ["repo.worktree"],
+      "sideEffects": [
+        { "type": "filesystem", "target": "./worktree", "mode": "write", "reversible": true }
+      ]
+    },
+    {
+      "id": "build",
+      "title": "Build and sign the release bundle",
+      "needs": ["checkout"],
+      "inputs": ["repo.worktree", "secrets.signing_key"],
+      "outputs": ["dist.bundle"],
+      "sideEffects": [
+        { "type": "process", "target": "npm run build", "mode": "write", "reversible": true },
+        { "type": "secret", "target": "vault://release/signing-key", "mode": "read", "reversible": true }
+      ]
+    },
+    {
+      "id": "archive",
+      "title": "Archive the bundle next to the previous release",
+      "needs": ["checkout", "prune-old-releases"],
+      "inputs": ["dist.bundle"],
+      "outputs": ["archive.tarball"],
+      "sideEffects": [
+        { "type": "filesystem", "target": "./archive", "mode": "write", "reversible": true }
+      ]
+    },
+    {
+      "id": "publish",
+      "title": "Publish the bundle to the public registry",
+      "inputs": ["dist.bundle", "credentials.registry"],
+      "outputs": ["registry.release"],
+      "sideEffects": [
+        { "type": "network", "target": "https://registry.example.invalid/publish", "mode": "write", "reversible": false },
+        { "type": "storage", "target": "s3://example-releases/latest.tar.gz", "mode": "write" }
+      ]
+    },
+    {
+      "id": "announce",
+      "title": "Announce the release",
+      "inputs": ["registry.release"],
+      "outputs": ["registry.release"],
+      "sideEffects": [
+        { "type": "email", "target": "releases@example.invalid", "mode": "write", "reversible": false },
+        { "type": "notification", "target": "ops-channel", "mode": "write", "reversible": true }
+      ]
+    }
+  ]
+}

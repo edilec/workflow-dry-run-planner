@@ -1,0 +1,53 @@
+{
+  "workflow": "package-release-rehearsal",
+  "description": "A release workflow whose every step is confined to the workspace, so a dry run can rehearse all of it and throw the checkout away afterwards.",
+  "steps": [
+    {
+      "id": "checkout",
+      "title": "Restore the working tree at the requested revision",
+      "inputs": ["repo.revision"],
+      "outputs": ["repo.worktree"],
+      "sideEffects": [
+        { "type": "filesystem", "target": "./worktree", "mode": "write", "reversible": true }
+      ]
+    },
+    {
+      "id": "install",
+      "title": "Install the pinned dependencies",
+      "inputs": ["repo.worktree", "cache.modules"],
+      "outputs": ["repo.node_modules"],
+      "sideEffects": [
+        { "type": "cache", "target": "./.cache/modules", "mode": "write", "reversible": true },
+        { "type": "filesystem", "target": "./node_modules", "mode": "write", "reversible": true }
+      ]
+    },
+    {
+      "id": "build",
+      "title": "Build the release bundle",
+      "inputs": ["repo.worktree", "repo.node_modules"],
+      "outputs": ["dist.bundle"],
+      "sideEffects": [
+        { "type": "process", "target": "npm run build", "mode": "write", "reversible": true },
+        { "type": "filesystem", "target": "./dist", "mode": "write", "reversible": true }
+      ]
+    },
+    {
+      "id": "verify",
+      "title": "Run the test suite against the bundle",
+      "inputs": ["dist.bundle", "repo.node_modules"],
+      "outputs": ["report.verification"],
+      "sideEffects": [
+        { "type": "process", "target": "npm test", "mode": "read", "reversible": true }
+      ]
+    },
+    {
+      "id": "stage",
+      "title": "Lay the reviewed bundle out for a human to inspect",
+      "needs": ["checkout"],
+      "inputs": ["dist.bundle", "report.verification"],
+      "sideEffects": [
+        { "type": "filesystem", "target": "./stage", "mode": "write", "reversible": true }
+      ]
+    }
+  ]
+}

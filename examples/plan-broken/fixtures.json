@@ -1,0 +1,15 @@
+{
+  "description": "A fixture set that has drifted away from the workflow it was written for.",
+  "fixtures": [
+    {
+      "id": "repo",
+      "description": "The revision and a pre-made worktree.",
+      "provides": ["repo.revision", "repo.worktree"]
+    },
+    {
+      "id": "seed",
+      "description": "A second fixture that also claims the revision, plus sample data no step asks for.",
+      "provides": ["repo.revision", "sample.orders"]
+    }
+  ]
+}
