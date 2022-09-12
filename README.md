@@ -62,15 +62,23 @@ findings: 0 error, 0 warning, 0 info.
 The deliberately broken example shows the two things this tool exists to expose — a prerequisite
 nobody supplies, and an effect a rehearsal could not undo:
 
+Lines are shown wrapped here; the tool emits one line per finding.
+
 ```
 ERROR   workflow.json/steps/build/inputs/secrets.signing_key step-input-unsatisfied Step "build"
-        requires "secrets.signing_key", which no earlier step produces and no fixture supplies.
+requires "secrets.signing_key", which no earlier step produces and no fixture supplies. A real run
+would start this step without it. -- required by build at position 2
+
 ERROR   workflow.json/steps/publish/sideEffects/0000 side-effect-irreversible Step "publish"
-        declares a network write on "https://registry.example.invalid/publish". A real run would
-        make a change outside the workspace that the workflow itself declares cannot be undone.
+declares a network write on "https://registry.example.invalid/publish". A real run would make a
+change outside the workspace that the workflow itself declares cannot be undone. -- network write
+https://registry.example.invalid/publish (external, reversible false)
+
 ERROR   workflow.json/steps/publish/sideEffects/0001 side-effect-reversibility-unknown Step
-        "publish" declares a storage write on "s3://example-releases/latest.tar.gz" and the
-        workflow does not say whether that can be undone; an undeclared answer is not a safe one.
+"publish" declares a storage write on "s3://example-releases/latest.tar.gz". A real run would change
+something outside the workspace and the workflow does not say whether that can be undone; an
+undeclared answer is not a safe one. -- storage write s3://example-releases/latest.tar.gz (external,
+reversibility undeclared)
 ```
 
 Try both example sets:
