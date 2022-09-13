@@ -5,6 +5,7 @@ import {
   DEFAULT_LIMITS,
   ID_PATTERN,
   NAME_OUTPUT_LIMIT,
+  REDACTED,
   TimeLimitExceeded,
   byCodeUnit,
   createBudget,
@@ -16,6 +17,7 @@ import {
   validateFixtures,
   validateLimits,
   validateWorkflow,
+  withoutQuotedContent,
 } from '../src/index.mjs'
 
 /**
@@ -54,12 +56,36 @@ test('nesting depth is measured on the text, ignoring braces inside strings', ()
   assert.equal(jsonNestingDepth('[[[', 3).exceeded, false)
 })
 
-test('a parse failure is a value, not a throw, and its reason is bounded', () => {
+test('a parse failure is a value, not a throw, and it carries none of the document', () => {
+  // The assertion this replaces was `reason.length <= 203`, which no input can
+  // falsify: V8's longest JSON.parse message is 78 characters, so the 200
+  // character bound in parseJson held whether or not it was written. The bound
+  // stays as defence in depth against an engine with longer messages; what is
+  // asserted here is the property a fixture can actually break.
   const failure = parseJson('{')
   assert.equal(failure.ok, false)
   assert.equal(typeof failure.reason, 'string')
-  assert.equal(failure.reason.length <= 203, true)
+  assert.equal(failure.reason.includes('at position 1'), true, 'the position survives redaction')
+  assert.equal(/["']/.test(failure.reason), false, 'a quote in the reason means a quoted span of the document survived')
+
+  // The parser quotes the offending input; the reason must not.
+  const leak = parseJson('AKIAIOSFODNN7EXAMPLE_super_secret_token_value_here')
+  assert.equal(leak.reason.includes('AKIA'), false)
+  assert.equal(leak.reason, `Unexpected token ${REDACTED}... is not valid JSON`)
+
   assert.deepEqual(parseJson('{"a":1}'), { ok: true, value: { a: 1 } })
+})
+
+test('a quoted span is removed whole, including anything hiding inside it', () => {
+  // The span between the outermost quotes is dropped without being read, so a
+  // control character a parser echoed from the document cannot survive either,
+  // and neither can a second quoted run.
+  assert.equal(withoutQuotedContent('Unexpected end of JSON input'), 'Unexpected end of JSON input')
+  assert.equal(withoutQuotedContent(`a 'x' b`), `a ${REDACTED} b`)
+  assert.equal(withoutQuotedContent(`a 'x', "yyy"... b`), `a ${REDACTED}... b`)
+  assert.equal(withoutQuotedContent(`a "${String.fromCharCode(0x0a)}z" b`), `a ${REDACTED} b`)
+  assert.equal(withoutQuotedContent(`"only"`), ` ${REDACTED}`)
+  assert.equal(withoutQuotedContent(`a "unclosed`), `a ${REDACTED}`)
 })
 
 test('a step id is an identifier and nothing looser', () => {

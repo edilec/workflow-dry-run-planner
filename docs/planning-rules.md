@@ -291,11 +291,28 @@ Every untrusted string that reaches output is stripped of these characters, not 
 | DEL | `U+007F` |
 | C1 | `U+0080`–`U+009F` |
 | Line and paragraph separators | `U+2028`, `U+2029` |
-| Bidi controls | `U+200E`, `U+200F`, `U+202A`–`U+202E`, `U+2066`–`U+2069` |
+| Bidi controls | `U+061C`, `U+200E`, `U+200F`, `U+202A`–`U+202E`, `U+2066`–`U+2069` |
 
 That includes identifiers: fixture ids, resource names, side effect targets, file labels and rule
 messages, not just an excerpt field. `U+0085` (NEL) and `U+009B` (8-bit CSI) forge report lines;
-`U+202E` reverses everything displayed after it.
+`U+202E` reverses everything displayed after it. The bidi row is every code point Unicode gives
+`Bidi_Control`, all twelve of them — `U+061C` ARABIC LETTER MARK is as invisible as `U+200F` and
+was missing from an enumeration that called itself complete.
+
+### Document content is never quoted back into the report
+
+`workflow-not-json` and `fixtures-not-json` carry the parser's reason as `evidence`, and a parser
+does not only say *where* a document broke: V8 quotes up to sixteen characters of the offending
+input into the message. A fixtures document is supposed to carry names and never values, so a
+report that echoes the first line of a malformed one back onto stdout is the leak this catalog
+refuses one step removed.
+
+Everything between the first quote character of a parser message and its last is therefore replaced
+with `(content redacted)`, which is over-redaction on purpose: the alternative is a rule that has to
+know each engine's phrasing to tell an engine's own quoted token from a span of the document, and a
+rule like that leaks the first time the phrasing changes. The position survives, because
+`at position 13 (line 1 column 14)` carries no quote and is the half a reader needs. The reason
+contains no quote character at all, which is what `test/sanitisation.test.mjs` asserts.
 
 ## Limits and non-goals — what this tool cannot conclude
 

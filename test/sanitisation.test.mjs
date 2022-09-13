@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { excerpt, formatReport, label, planDocuments } from '../src/index.mjs'
+import { REDACTED, excerpt, formatReport, label, parseJson, planDocuments } from '../src/index.mjs'
 
 /**
  * Sanitisation, tested by class and by route.
@@ -33,6 +33,7 @@ const CLASSES = Object.freeze([
   { name: 'C1 NEL', code: 0x85 },
   { name: 'C1 CSI', code: 0x9b },
   { name: 'C1 APC', code: 0x9f },
+  { name: 'ARABIC LETTER MARK', code: 0x061c },
   { name: 'LINE SEPARATOR', code: 0x2028 },
   { name: 'PARAGRAPH SEPARATOR', code: 0x2029 },
   { name: 'LEFT-TO-RIGHT MARK', code: 0x200e },
@@ -207,4 +208,89 @@ test('an excerpt is bounded as well as cleaned', () => {
   assert.equal(excerpt(long).length, 163)
   assert.equal(excerpt(long).endsWith('...'), true)
   assert.equal(label(long).length, 243)
+})
+
+test('every Bidi_Control code point is stripped, not the ones that came to mind', () => {
+  // The recorded defect: an enumeration that called itself "the bidirectional
+  // formatting characters" and listed eleven of the twelve. U+061C ARABIC
+  // LETTER MARK is as invisible as U+200F and does the same work, and it
+  // reached both the human report and the raw JSON through an identifier and
+  // through free text.
+  const bidi = []
+  for (let code = 0; code <= 0xffff; code += 1) {
+    if (/\p{Bidi_Control}/u.test(String.fromCharCode(code))) bidi.push(code)
+  }
+
+  assert.equal(bidi.length, 12, 'Unicode gives twelve code points Bidi_Control')
+  for (const code of bidi) {
+    assert.equal(excerpt(`a${ch(code)}b`), 'a b', `U+${code.toString(16).toUpperCase().padStart(4, '0')} survived excerpt`)
+  }
+})
+
+test('U+061C reaches neither the plan nor the raw JSON through a resource name', () => {
+  const mark = ch(0x061c)
+  const report = planDocuments({
+    workflow: JSON.stringify({ workflow: 'alm', steps: [{ id: 'build', inputs: [`repo${mark}worktree`] }] }),
+  })
+
+  assert.equal(report.plan.steps[0].inputs[0].name, 'repo worktree')
+  assert.equal(JSON.stringify(report).includes(mark), false, 'U+061C survived into the raw JSON')
+  assert.equal(formatReport(report).includes(mark), false, 'U+061C survived into the human report')
+})
+
+test('excerpt collapses whitespace runs, including spaces no control class covers', () => {
+  // The recorded defect: every existing case fed excerpt a single character
+  // that the control class already maps to one space, so the whitespace
+  // normalisation itself was never exercised. A run of ordinary spaces and a
+  // non-C0 Unicode space are.
+  assert.equal(excerpt('a   b'), 'a b')
+  assert.equal(excerpt(`a${ch(0x00a0)}${ch(0x00a0)}b`), 'a b', 'U+00A0 NBSP is whitespace and no control character')
+  assert.equal(excerpt(`a${ch(0x3000)}b`), 'a b', 'U+3000 IDEOGRAPHIC SPACE is whitespace and no control character')
+  assert.equal(excerpt(`a${ch(0x09)}${ch(0x09)}${ch(0x09)}b`), 'a b', 'a run of control characters collapses to one space')
+  assert.equal(excerpt(`${ch(0x00a0)} a b ${ch(0x00a0)}`), 'a b')
+})
+
+test('a resource name padded with whitespace reaches the plan as a single-line, single-spaced name', () => {
+  const report = planDocuments({
+    workflow: JSON.stringify({
+      workflow: 'spacing',
+      steps: [{ id: 'build', inputs: [`repo${ch(0x00a0)}${ch(0x00a0)}worktree   two`] }],
+    }),
+  })
+
+  assert.equal(report.plan.steps[0].inputs[0].name, 'repo worktree two')
+  assert.equal(report.findings[0].message.includes('"repo worktree two"'), true)
+})
+
+test('a parser never quotes the document back into the evidence of a finding', () => {
+  // The recorded defect: V8 quotes up to sixteen characters of the offending
+  // input into its JSON.parse message, so a fixtures file holding a token
+  // echoed part of that token onto stdout as `evidence`.
+  const secret = 'AKIAIOSFODNN7EXAMPLE_super_secret_token_value_here'
+  const report = planDocuments({
+    workflow: JSON.stringify({ workflow: 'echo', steps: [{ id: 'build', inputs: ['seed.rows'] }] }),
+    fixtures: secret,
+  })
+
+  const finding = report.findings.find((item) => item.ruleId === 'fixtures-not-json')
+  assert.equal(finding.evidence.includes('AKIA'), false, 'document content reached the report')
+  assert.equal(finding.evidence.includes(REDACTED), true)
+  assert.equal(/["']/.test(finding.evidence), false, 'nothing a parser quoted survived')
+  assert.equal(JSON.stringify(report).includes('AKIA'), false)
+  assert.equal(formatReport(report).includes('AKIA'), false)
+})
+
+test('redaction keeps the position a reader needs and drops everything between the quotes', () => {
+  const positional = parseJson('{"a":1}trailing')
+  assert.equal(positional.reason.includes('at position 7'), true, 'the position carries no quote and must survive')
+  assert.equal(/["']/.test(positional.reason), false)
+
+  const quoted = parseJson('{')
+  assert.equal(quoted.reason.includes('at position 1'), true)
+  assert.equal(quoted.reason.includes(REDACTED), true)
+  assert.equal(/["']/.test(quoted.reason), false)
+
+  const unquoted = parseJson('')
+  assert.equal(unquoted.reason.includes(REDACTED), false, 'a message quoting nothing is left alone')
+  assert.equal(unquoted.reason.length > 0, true)
 })

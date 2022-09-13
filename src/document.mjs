@@ -39,12 +39,16 @@ export function byCodeUnit(left, right) {
  *   a line break to a great many readers, and `U+009B` is the 8-bit form of
  *   CSI, so it opens a terminal control sequence with no ESC in sight.
  * - `U+2028` and `U+2029` -- the line and paragraph separators.
- * - `U+200E`, `U+200F`, `U+202A-U+202E`, `U+2066-U+2069` -- the bidirectional
- *   formatting characters. `U+202E` RIGHT-TO-LEFT OVERRIDE reverses everything
- *   displayed after it, so a rule id or a target can be made to read as
- *   something else entirely while the bytes say otherwise.
+ * - `U+061C`, `U+200E`, `U+200F`, `U+202A-U+202E`, `U+2066-U+2069` -- every
+ *   code point Unicode gives `Bidi_Control`, counted rather than remembered.
+ *   `U+202E` RIGHT-TO-LEFT OVERRIDE reverses everything displayed after it, so
+ *   a rule id or a target can be made to read as something else entirely while
+ *   the bytes say otherwise, and `U+061C` ARABIC LETTER MARK is the one this
+ *   enumeration was missing: it is as invisible as `U+200F` and does the same
+ *   work, so listing eleven of the twelve and calling it "the bidirectional
+ *   formatting characters" was a gap, not a decision.
  */
-const CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029\u200E\u200F\u202A-\u202E\u2066-\u2069]/g
+const CONTROL = /[\u0000-\u001F\u007F-\u009F\u061C\u2028\u2029\u200E\u200F\u202A-\u202E\u2066-\u2069]/g
 
 export const EXCERPT_LIMIT = 160
 
@@ -124,12 +128,66 @@ export function jsonNestingDepth(text, maxDepth) {
   return { exceeded: false, deepest }
 }
 
-/** Parse JSON without letting a parser failure reach the caller as a throw. */
+/** What a redacted parser message says stands in the place of the document. */
+export const REDACTED = '(content redacted)'
+
+/**
+ * Strip the document content a parser quoted back at us.
+ *
+ * `JSON.parse` does not merely say where a document broke: V8 quotes up to
+ * sixteen characters of the offending input into the message, so a fixtures
+ * file whose first line is a token produces `Unexpected token 'A',
+ * "AKIAIOSFOD"... is not valid JSON` -- and that reason becomes the `evidence`
+ * of the finding, on stdout, in a report people paste into reviews. This
+ * package's own design note says a fixture carries names and never values
+ * precisely so that material like that stays out of the report; echoing it
+ * back through a syntax error is the same leak by another door.
+ *
+ * Everything a parser quotes is between its first quote character and its
+ * last, so that whole span is replaced. What survives is the fixed English and
+ * the position -- `at position 13 (line 1 column 14)` carries no quote and is
+ * the half a reader actually needs. The result contains no quote character at
+ * all, which is the invariant worth testing: no span of the document can have
+ * survived a rule that keeps nothing between the outermost quotes.
+ *
+ * Over-redaction is deliberate. A parser that quotes its own expected token --
+ * `Expected property name or '}'` -- loses that token here, and a message
+ * that names a limit rather than a document loses nothing, because the
+ * alternative is a rule that has to know each engine's phrasing to tell the
+ * two apart, and a rule like that leaks the first time the phrasing changes.
+ */
+const QUOTE = /["']/
+
+export function withoutQuotedContent(message) {
+  const first = message.search(QUOTE)
+  if (first === -1) return message
+  // A message holding one quote and no closing one has nowhere honest to stop,
+  // so everything after that quote goes. Stopping at the quote instead would
+  // keep precisely the span an unterminated quote opened, which is the half
+  // most likely to be document text.
+  let last = message.length - 1
+  for (let index = message.length - 1; index > first; index -= 1) {
+    if (QUOTE.test(message[index])) {
+      last = index
+      break
+    }
+  }
+  return `${message.slice(0, first).trimEnd()} ${REDACTED}${message.slice(last + 1)}`
+}
+
+/**
+ * Parse JSON without letting a parser failure reach the caller as a throw.
+ *
+ * The reason is redacted first and bounded second. The bound is defence in
+ * depth rather than a limit any current engine reaches -- V8's longest
+ * `JSON.parse` message is well under it -- and it stays because the reason
+ * becomes report evidence, and evidence in this report is bounded by contract.
+ */
 export function parseJson(text) {
   try {
     return { ok: true, value: JSON.parse(text) }
   } catch (error) {
-    return { ok: false, reason: excerpt(error.message, 200) }
+    return { ok: false, reason: excerpt(withoutQuotedContent(error.message), 200) }
   }
 }
 

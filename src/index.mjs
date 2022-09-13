@@ -553,6 +553,7 @@ export {
   ID_PATTERN,
   MUTATING_MODES,
   NAME_OUTPUT_LIMIT,
+  REDACTED,
   SIDE_EFFECT_MODES,
   SIDE_EFFECT_SCOPE,
   SIDE_EFFECT_TYPES,
@@ -568,4 +569,5 @@ export {
   pointerSegment,
   validateFixtures,
   validateWorkflow,
+  withoutQuotedContent,
 } from './document.mjs'
