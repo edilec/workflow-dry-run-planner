@@ -279,7 +279,19 @@ Ordering is pinned **behaviourally**, not by scanning the source for a comparato
 collator collates identically and spells differently, so that scan proves nothing. The tests drive
 inputs whose order genuinely differs between code-unit and collation ordering — `Z` before `a`,
 `a-b` before `a_b`, `README` before `assets` — through the real report path and assert the exact
-emitted plan order and finding order.
+emitted sequence.
+
+Every comparison site gets its own input and its own assertion, because each can be substituted on
+its own: the plan order and the ready-step tie-break, a step's `dependsOn`, the step list a finding
+names, the fixture a step is shown reading from, the emitted `plan.fixtures`, and each of the four
+comparisons the finding order is decided by — file, then pointer, then rule id, then message.
+
+Two of those sort values drawn from a closed alphabet this package owns: rule ids, and the side
+effect vocabulary. Over their real values code-unit order and English collation agree on every
+ordered pair, so no input can tell the two comparators apart there. That is asserted rather than
+assumed — the test enumerates all 1032 ordered pairs — so a rule id or a type added later whose
+ordering a collator *would* disagree about fails the suite instead of quietly becoming an ordering
+site nothing pins.
 
 ## Sanitisation
 

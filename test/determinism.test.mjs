@@ -4,7 +4,15 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { byCodeUnit, formatReport, planDocuments, planDryRun } from '../src/index.mjs'
+import {
+  RULE_SEVERITY,
+  SIDE_EFFECT_MODES,
+  SIDE_EFFECT_TYPES,
+  byCodeUnit,
+  formatReport,
+  planDocuments,
+  planDryRun,
+} from '../src/index.mjs'
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -137,6 +145,166 @@ test('two runs over the same bytes produce byte-identical output', async () => {
   assert.equal(JSON.stringify(first), JSON.stringify(second))
   assert.equal(formatReport(first), formatReport(second))
   assert.equal(first.findings.length > 10, true, 'the comparison is over a report with something in it')
+})
+
+/**
+ * Every remaining ordering site, pinned where it reaches output.
+ *
+ * The plan order above is only one of them. A collator substituted at any one
+ * comparator below -- and each can be substituted on its own -- reorders a
+ * field the report emits, so each has its own input whose collation order
+ * differs from its code-unit order and its own assertion on the exact emitted
+ * sequence. `Z` against `a` (0x5A before 0x61, collation says a first), `a-b`
+ * against `a_b` (0x2D before 0x5F, collation reverses it) and `README` against
+ * `assets` are the three disagreements used throughout.
+ */
+
+test('the emitted fixture list is ordered by code unit, not by collation', () => {
+  // Declared in the reverse of the order they must come out in, so the
+  // assertion fails for a comparator that collates and for no comparator.
+  const declared = ['seed', 'assets', 'a_b', 'a-b', 'Z', 'README']
+  const report = planDocuments({
+    workflow: JSON.stringify({ workflow: 'fixture-order', steps: [{ id: 'build', inputs: ['seed.rows'] }] }),
+    fixtures: JSON.stringify({
+      fixtures: declared.map((id) => ({ id, provides: [id === 'seed' ? 'seed.rows' : `provided.${id}`] })),
+    }),
+  })
+
+  assert.deepEqual(report.plan.fixtures.map((fixture) => fixture.id), ['README', 'Z', 'a-b', 'a_b', 'assets', 'seed'])
+  assert.deepEqual(
+    [...declared].sort((left, right) => new Intl.Collator('en').compare(left, right)),
+    ['a_b', 'a-b', 'assets', 'README', 'seed', 'Z'],
+    'a collator would have emitted a different fixture list, which is what makes the assertion above mean something',
+  )
+})
+
+test('the dependency list of a step is emitted in code-unit order', () => {
+  const report = planDocuments({
+    workflow: JSON.stringify({
+      workflow: 'dependencies',
+      steps: [...SCRAMBLED.map((id) => ({ id })), { id: 'last', needs: [...SCRAMBLED].reverse() }],
+    }),
+  })
+  const last = report.plan.steps.find((step) => step.id === 'last')
+
+  assert.deepEqual(last.dependsOn, ['README', 'Z', 'a-b', 'a_b', 'assets'])
+  assert.deepEqual(
+    [...last.dependsOn].sort((left, right) => new Intl.Collator('en').compare(left, right)),
+    ['a_b', 'a-b', 'assets', 'README', 'Z'],
+    'a collator orders this list the other way',
+  )
+})
+
+test('a finding that names a list of steps names them in code-unit order', () => {
+  const report = planDocuments({
+    workflow: JSON.stringify({
+      workflow: 'producers',
+      steps: [
+        ...SCRAMBLED.map((id) => ({ id, outputs: ['shared.artifact'] })),
+        { id: 'consume', inputs: ['shared.artifact'] },
+      ],
+    }),
+  })
+  const duplicate = report.findings.find((finding) => finding.ruleId === 'step-output-duplicate')
+
+  assert.equal(duplicate.evidence, 'producers: README, Z, a-b, a_b, assets')
+  assert.equal(duplicate.message.includes('(README, Z, a-b, a_b, assets)'), true)
+})
+
+test('the fixture a step is shown reading from is the code-unit first of the ones providing it', () => {
+  const report = planDocuments({
+    workflow: JSON.stringify({ workflow: 'shadowed', steps: [{ id: 'build', inputs: ['seed.rows'] }] }),
+    fixtures: JSON.stringify({
+      fixtures: [{ id: 'assets', provides: ['seed.rows'] }, { id: 'Z', provides: ['seed.rows'] }],
+    }),
+  })
+
+  assert.equal(report.plan.steps[0].inputs[0].source, 'fixture')
+  assert.equal(report.plan.steps[0].inputs[0].from, 'Z')
+  assert.equal(new Intl.Collator('en').compare('Z', 'assets') > 0, true, 'a collator would have named assets instead')
+})
+
+test('findings from two documents are ordered by file name in code units', () => {
+  const report = planDocuments({
+    workflowFile: 'Z.json',
+    fixturesFile: 'a.json',
+    workflow: JSON.stringify({
+      workflow: 'two-files',
+      steps: [{ id: 'notify', sideEffects: [{ type: 'notification', target: 'ops-channel', mode: 'write', reversible: true }] }],
+    }),
+    fixtures: JSON.stringify({ fixtures: [{ id: 'spare', provides: ['unused.rows'] }] }),
+  })
+
+  assert.deepEqual(report.findings.map((finding) => finding.location.file), ['Z.json', 'a.json'])
+  assert.equal(new Intl.Collator('en').compare('Z.json', 'a.json') > 0, true, 'a collator would have put a.json first')
+})
+
+test('two findings alike in file, pointer and rule are ordered by message in code units', () => {
+  // Two unknown top-level keys produce two workflow-invalid faults at the same
+  // pointer in the same file, so the message comparison is the whole tie-break
+  // and nothing else in the sort can decide the order.
+  const report = planDocuments({
+    workflow: JSON.stringify({ workflow: 'keys', steps: [{ id: 'build' }], Z: 1, a: 2 }),
+  })
+
+  assert.deepEqual(
+    report.findings.map((finding) => `${finding.location.file}${finding.location.pointer}${finding.ruleId}`),
+    ['workflow.json/workflow-invalid', 'workflow.json/workflow-invalid'],
+  )
+  assert.deepEqual(report.findings.map((finding) => finding.message.match(/unknown key "(.*?)"/)[1]), ['Z', 'a'])
+  assert.equal(
+    new Intl.Collator('en').compare(report.findings[0].message, report.findings[1].message) > 0,
+    true,
+    'a collator would have put the message naming "a" first',
+  )
+})
+
+test('the side effect vocabulary reaches the report in one fixed order', () => {
+  const report = planDocuments({
+    workflow: JSON.stringify({
+      workflow: 'vocabulary',
+      steps: [{ id: 'call', sideEffects: [{ type: 'ftp', target: 'files.example.invalid', mode: 'write' }] }],
+    }),
+  })
+
+  assert.equal(
+    report.findings[0].suggestion,
+    'Use one of: cache, database, deployment, email, filesystem, message, network, notification, payment, process, queue, secret, storage.',
+  )
+})
+
+test('the closed alphabets this tool sorts cannot disagree with a collator at all', () => {
+  // Two ordering sites sort values drawn from a closed alphabet this package
+  // owns: the rule id comparison in sortRows, and the side effect vocabulary
+  // in the suggestion above. Over their real values, code-unit order and
+  // English collation agree on every ordered pair, so no input can tell a
+  // collator substituted at those sites from byCodeUnit -- they are equivalent
+  // mutants rather than unpinned sites, and this is the proof.
+  //
+  // It is kept runnable rather than written down, so a rule id or a side
+  // effect type added later whose ordering a collator *would* disagree about
+  // fails here, where the comment says what to do about it, instead of
+  // quietly becoming an ordering site nothing pins.
+  const collator = new Intl.Collator('en')
+  let pairs = 0
+  for (const [what, values] of [
+    ['rule ids', Object.keys(RULE_SEVERITY)],
+    ['side effect types', [...SIDE_EFFECT_TYPES]],
+    ['side effect modes', [...SIDE_EFFECT_MODES]],
+  ]) {
+    for (const left of values) {
+      for (const right of values) {
+        if (left === right) continue
+        pairs += 1
+        assert.equal(
+          Math.sign(collator.compare(left, right)),
+          byCodeUnit(left, right),
+          `${what}: "${left}" and "${right}" order differently under collation, so that site now needs a behavioural pin`,
+        )
+      }
+    }
+  }
+  assert.equal(pairs, 870 + 156 + 6, 'every ordered pair of every closed alphabet was compared')
 })
 
 /**

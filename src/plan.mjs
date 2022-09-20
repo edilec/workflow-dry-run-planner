@@ -198,7 +198,11 @@ export function compilePlan({ workflow, fixtures, workflowFile, fixturesFile, bu
 
   const byId = new Map(workflow.steps.map((step) => [step.id, step]))
   const producersByResource = new Map()
-  const consumersByResource = new Map()
+  // Only membership is ever asked of the consumer side -- "does anything in
+  // this workflow read that?" -- so it is a set. A parallel map of consumer
+  // lists would carry an ordering nothing emits, which is an ordering no test
+  // could pin and no reader could check.
+  const consumedResources = new Set()
   for (const step of workflow.steps) {
     budget.check('resource indexing')
     for (const output of step.outputs) {
@@ -208,16 +212,12 @@ export function compilePlan({ workflow, fixtures, workflowFile, fixturesFile, bu
       counts.expectedOutputs += 1
     }
     for (const input of step.inputs) {
-      const list = consumersByResource.get(input) ?? []
-      list.push(step.id)
-      consumersByResource.set(input, list)
+      consumedResources.add(input)
       counts.requiredInputs += 1
     }
   }
   for (const [resource, list] of producersByResource) producersByResource.set(resource, sortedNames(list))
-  for (const [resource, list] of consumersByResource) consumersByResource.set(resource, sortedNames(list))
 
-  const fixtureById = new Map(fixtures.map((fixture) => [fixture.id, fixture]))
   const fixturesByResource = new Map()
   for (const fixture of fixtures) {
     budget.check('fixture indexing')
@@ -349,7 +349,7 @@ export function compilePlan({ workflow, fixtures, workflowFile, fixturesFile, bu
   // leftover from a step that was deleted.
   for (const step of workflow.steps) {
     for (const output of step.outputs) {
-      if (consumersByResource.has(output)) continue
+      if (consumedResources.has(output)) continue
       push(collector, {
         file: workflowFile,
         pointer: `/steps/${pointerSegment(step.id)}/outputs/${pointerSegment(output)}`,
@@ -385,7 +385,7 @@ export function compilePlan({ workflow, fixtures, workflowFile, fixturesFile, bu
           suggestion: 'Drop the fixture entry, or confirm it is there to seed the steps that run before the producer.',
         })
       }
-      if (!consumersByResource.has(resource)) {
+      if (!consumedResources.has(resource)) {
         push(collector, {
           file: fixturesFile,
           pointer: `${pointerBase}/provides/${pointerSegment(resource)}`,
