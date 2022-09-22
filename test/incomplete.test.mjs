@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-import { formatReport, planDocuments, planDryRun } from '../src/index.mjs'
+import { formatReport, isInside, planDocuments, planDryRun } from '../src/index.mjs'
 
 const run = promisify(execFile)
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -261,6 +261,50 @@ test('a file genuinely inside a root reached through a symbolic link is still pl
     assert.equal(report.status, 'pass')
     assert.deepEqual(report.plan.order, ['build'])
   })
+})
+
+test('a sibling directory whose name merely starts with the root is outside the root', async () => {
+  // The recorded defect: containment decided by `candidate.startsWith(root)`
+  // with no separator. `/tmp/plan-evil` starts with `/tmp/plan`, so the
+  // sibling's content was read, planned and reported as a clean pass. The
+  // boundary is a path separator, not a name prefix.
+  await withBase(async (base) => {
+    const root = join(base, 'plan')
+    const sibling = join(base, 'plan-evil')
+    await mkdir(root)
+    await mkdir(sibling)
+    await writeFile(join(sibling, 'workflow.json'), JSON.stringify({
+      workflow: 'SIBLING_CONTENT_MARKER',
+      steps: [{ id: 'leak' }],
+    }))
+
+    const { code, stdout } = await runCli(['--root', root, '--workflow', '../plan-evil/workflow.json', '--json'])
+
+    assert.equal(code, 2)
+    const report = JSON.parse(stdout)
+    assert.equal(report.status, 'incomplete')
+    assert.equal(report.summary.errors, 1)
+    assert.equal(report.findings[0].ruleId, 'path-escapes-root')
+    assert.equal(report.plan.workflow, null)
+    assert.deepEqual(report.plan.order, [])
+    assert.equal(stdout.includes('SIBLING_CONTENT_MARKER'), false, 'out-of-root content reached the report')
+  })
+})
+
+test('the root boundary is a separator, and a root that already ends in one is not doubled', () => {
+  const root = `${sep}srv${sep}plan`
+
+  assert.equal(isInside(root, root), true, 'the root is inside itself')
+  assert.equal(isInside(root, `${root}${sep}workflow.json`), true)
+  assert.equal(isInside(root, `${root}${sep}nested${sep}workflow.json`), true)
+  assert.equal(isInside(root, `${root}-evil${sep}workflow.json`), false, 'a sibling sharing the name prefix is outside')
+  assert.equal(isInside(root, `${root}evil`), false)
+  assert.equal(isInside(root, `${sep}srv${sep}pla`), false)
+  assert.equal(isInside(root, `${sep}srv`), false, 'the parent is not inside the child')
+  // A root that already ends in a separator must not have a second one added,
+  // or nothing at all would be inside it.
+  assert.equal(isInside(`${sep}`, `${sep}srv`), true)
+  assert.equal(isInside(`${root}${sep}`, `${root}${sep}workflow.json`), true)
 })
 
 test('an absolute --workflow is read inside the root, not outside it', async () => {
