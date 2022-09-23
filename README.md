@@ -191,8 +191,9 @@ started would be worse.
   `U+009B` CSI included), `U+2028`, `U+2029` and the bidi overrides are removed, so nothing read can
   forge a report line or reverse one.
 - **Output is deterministic.** No wall clock in the report, no locale, no `localeCompare`, no
-  `Intl.Collator`, no random source, no network — pinned by the plan order and finding order the
-  report actually emits for inputs a collator orders the other way, not by grepping the source.
+  `Intl.Collator`, no random source, no network — pinned by what the report actually emits for
+  inputs a collator orders the other way, not by grepping the source, and pinned separately at
+  every comparison site, because each one can be substituted on its own.
 
 ## Limits and non-goals — what this tool cannot conclude
 

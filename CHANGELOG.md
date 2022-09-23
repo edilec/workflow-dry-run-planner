@@ -50,8 +50,15 @@ All notable changes to this project are documented in this file.
   ids refused outright rather than cleaned, because an id is a map key, a pointer
   segment and a plan entry at once; the removed set is C0, DEL, the whole C1
   range (where `U+0085` NEL and the 8-bit CSI `U+009B` live), `U+2028`, `U+2029`
-  and the bidi formatting characters, whose `U+202E` would otherwise reverse
-  everything displayed after it;
+  and every one of the twelve code points Unicode gives `Bidi_Control` —
+  `U+061C` ARABIC LETTER MARK included — whose `U+202E` would otherwise
+  reverse everything displayed after it;
+- redaction of everything a parser quotes back at us: `JSON.parse` puts up to
+  sixteen characters of the offending document into its message, and that
+  message is the `evidence` of `workflow-not-json` and `fixtures-not-json`, so a
+  fixtures file holding a token would have echoed part of it onto stdout. The
+  span between a parser message's outermost quotes is replaced with
+  `(content redacted)`; the position survives, no quote character does;
 - a CLI with `--help`, `--json`, `--root`, `--workflow`, `--fixtures` and the
   limit flags, the report on stdout, diagnostics on stderr, and exit codes
   0 / 1 / 2 — with an empty stdout for a configuration error and an `incomplete`
@@ -89,16 +96,27 @@ All notable changes to this project are documented in this file.
 - Every finding takes its severity from one frozen `ruleId -> severity` table and
   an unknown rule id throws. The table, the documented catalog and a hand-written
   copy are asserted against each other, but a coordinated edit to three
-  declarations agrees with itself, so severity is pinned by consequence as well:
-  every rule whose severity alone decides the verdict is driven through the real
-  binary on a root that isolates it, and the report status and the process exit
-  code are asserted. A demotion turns `fail` into `pass` and exit 1 into exit 0,
-  which no edit to a declaration can hide.
+  declarations agrees with itself — and so does a fourth test that drives the
+  real binary and then compares what came back against an entry in a map the
+  same edit touches. So all thirty rules are pinned by literal outcome in a file
+  that imports nothing from `src/`, holds no table, no case list and no
+  parameterised expectation: each test builds its own root, runs the real binary
+  once, and states the exit code, the printed status word, the findings-line
+  counts and the severity word inline. Flipping any of the twenty-three error
+  rules to `warning` — table, docs and every expected-value map in the tests at
+  once — fails the suite; before this file, fourteen of them did not.
 - No wall clock reaches the report, and no locale, `localeCompare`,
   `Intl.Collator`, random source, network access or filesystem enumeration order
-  affects the output. Ordering is pinned by the plan order and the finding order
-  the report actually emits for inputs a collator orders the other way —
-  `README` before `assets`, `Z` before `a-b`, `a-b` before `a_b` — rather than by
-  scanning the source for a comparator's name.
+  affects the output. Ordering is pinned by what the report actually emits for
+  inputs a collator orders the other way — `README` before `assets`, `Z` before
+  `a-b`, `a-b` before `a_b` — rather than by scanning the source for a
+  comparator's name. Every comparison site has its own input and its own
+  assertion, because each can be substituted on its own: the plan order, the
+  ready-step tie-break, a step's `dependsOn`, the step list a finding names, the
+  fixture a step is shown reading from, the emitted `plan.fixtures`, and each of
+  the four comparisons that decide finding order. The two sites that sort a
+  closed alphabet this package owns — rule ids and the side effect vocabulary —
+  are where collation cannot disagree at all, which is asserted over every one of
+  their 1032 ordered pairs rather than assumed.
 
 No release has been published.
