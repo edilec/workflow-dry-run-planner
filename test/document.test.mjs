@@ -19,6 +19,7 @@ import {
   validateWorkflow,
   withoutQuotedContent,
 } from '../src/index.mjs'
+import { excerpt, label } from '../src/document.mjs'
 
 /**
  * The document layer: decoding, bounding and validating. Nothing here touches
@@ -250,4 +251,28 @@ test('every shape refusal the fixture validator can make is reachable and named'
       `${what} was not reported as "${expected}"`,
     )
   }
+})
+
+test('a value that cannot be converted to a string is described, not thrown over', () => {
+  // `String({toString: {}})` throws `Cannot convert object to primitive value`.
+  // A document carrying one used to abort the run: exit 2 with empty stdout,
+  // which is the shape reserved for a configuration error, and the findings for
+  // every other input in the same run went with it.
+  const unrenderable = { toString: {} }
+  assert.throws(() => String(unrenderable), TypeError)
+
+  assert.equal(excerpt(unrenderable), '[object]')
+  assert.equal(excerpt([unrenderable]), '[array]')
+  assert.equal(excerpt({ toString: null }), '[object]')
+  assert.equal(excerpt(Object.create(null)), '[object]')
+  assert.equal(label(unrenderable), '[object]')
+
+  // The shape is described; nothing of the value is reproduced.
+  assert.ok(!excerpt({ toString: {}, secret: 'ZQXJVBMP7WKD3NRT' }).includes('ZQXJ'))
+
+  // Values that CAN be rendered are unaffected, so the guard is not a blanket refusal.
+  assert.equal(excerpt('plain'), 'plain')
+  assert.equal(excerpt(42), '42')
+  assert.equal(excerpt(null), 'null')
+  assert.equal(excerpt({ toString: () => 'custom' }), 'custom')
 })

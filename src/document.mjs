@@ -61,9 +61,31 @@ export const EXCERPT_LIMIT = 160
  */
 export const NAME_OUTPUT_LIMIT = 240
 
+/**
+ * Render a value as text without trusting it to be renderable.
+ *
+ * `String(value)` throws `Cannot convert object to primitive value` for an
+ * object carrying a non-callable own `toString`, and `{"toString": {}}` in a
+ * document is enough to reach it. Uncaught, that costs the whole report: stdout
+ * is empty on exit 2 -- the shape this contract reserves for a configuration
+ * error -- and one malformed document suppresses the findings for every other
+ * input in the same run. A value that cannot be rendered is described by its
+ * shape instead, which is what the rest of this module does with untrusted
+ * content anyway: described, never reproduced.
+ */
+function renderable(value) {
+  if (typeof value === 'string') return value
+  try {
+    return String(value)
+  } catch {
+    if (Array.isArray(value)) return '[array]'
+    return `[${value === null ? 'null' : typeof value}]`
+  }
+}
+
 /** A bounded, single-line, control-free rendering. Input is data, never an instruction. */
 export function excerpt(value, limit = EXCERPT_LIMIT) {
-  const flattened = String(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+  const flattened = renderable(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
   if (flattened.length <= limit) return flattened
   return `${flattened.slice(0, limit)}...`
 }
