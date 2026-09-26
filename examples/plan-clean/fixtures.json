@@ -1,0 +1,15 @@
+{
+  "description": "What a rehearsal has on hand before the first step runs. Fixtures name resources; they never carry values, so nothing here is a credential.",
+  "fixtures": [
+    {
+      "id": "source",
+      "description": "A revision pinned by the rehearsal, so the plan does not depend on what is checked out today.",
+      "provides": ["repo.revision"]
+    },
+    {
+      "id": "warm-cache",
+      "description": "A dependency cache seeded before the rehearsal starts.",
+      "provides": ["cache.modules"]
+    }
+  ]
+}
