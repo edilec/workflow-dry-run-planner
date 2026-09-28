@@ -27,8 +27,10 @@ The report on stdout is the only thing this command produces. Nothing is fetched
 ## Install
 
 ```sh
-npm install workflow-dry-run-planner
+npm install github:edilec/workflow-dry-run-planner
 ```
+
+This installs the public GitHub source; `workflow-dry-run-planner` is not published to npm.
 
 Or run it from a checkout with no install at all:
 
@@ -39,9 +41,9 @@ node bin/workflow-dry-run-planner.mjs --root examples/plan-clean --fixtures fixt
 ## Use
 
 ```sh
-workflow-dry-run-planner --root ops/release
-workflow-dry-run-planner --root ops/release --fixtures fixtures.json
-workflow-dry-run-planner --root ops/release --fixtures fixtures.json --json
+npx workflow-dry-run-planner --root ops/release
+npx workflow-dry-run-planner --root ops/release --fixtures fixtures.json
+npx workflow-dry-run-planner --root ops/release --fixtures fixtures.json --json
 ```
 
 `--root` is required. `--workflow` defaults to `workflow.json` inside it; `--fixtures` is optional
